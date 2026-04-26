@@ -305,9 +305,18 @@ async def load_csv_data(force_reload: bool = False):
         region_db_map: dict[str, Region] = {}
         used_codes: set[str] = set()
         for index, (rname, rinfo) in enumerate(sorted(regions_data.items()), start=1):
-            code = rinfo["code"] or str(index).zfill(2)
-            if code in used_codes:
-                code = str(index).zfill(2)
+            preferred_code = rinfo["code"] if rinfo["code"] else None
+            if preferred_code and preferred_code not in used_codes:
+                code = preferred_code
+            else:
+                code = None
+                for attempt in range(1, 100):
+                    candidate = str(attempt).zfill(2)
+                    if candidate not in used_codes:
+                        code = candidate
+                        break
+                if code is None:
+                    raise RuntimeError("Не удалось назначить уникальный код региона (все 99 заняты)")
             used_codes.add(code)
 
             r = Region(
