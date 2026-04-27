@@ -1,4 +1,4 @@
-import { Card, Col, Row, Statistic, Typography } from 'antd'
+import { Card, Col, Row, Statistic, Typography, Segmented } from 'antd'
 import {
   TeamOutlined,
   HeartOutlined,
@@ -7,6 +7,7 @@ import {
   RiseOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useState, useMemo } from 'react'
 import {
   fetchDemographicsSummary,
   fetchDemographicsTimeseries,
@@ -46,7 +47,10 @@ function DeltaHint({
 export default function KPICards() {
   const { municipalityId, regionId, yearFrom, yearTo } = useFilterStore()
   const previousYear = yearTo > yearFrom ? yearTo - 1 : null
+  const yearTo2 = yearTo - 2
+  const [valueMode, setValueMode] = useState<'absolute' | 'percent'>('absolute')
 
+  // Запросы для региона (без изменений)
   const { data: popSummary } = useQuery({
     queryKey: ['populationSummary', yearTo, regionId],
     queryFn: () => fetchPopulationSummary({ year: yearTo, region_id: regionId ?? undefined }),
@@ -57,6 +61,12 @@ export default function KPICards() {
     queryKey: ['populationSummary', previousYear, regionId],
     queryFn: () => fetchPopulationSummary({ year: previousYear!, region_id: regionId ?? undefined }),
     enabled: !municipalityId && previousYear != null,
+  })
+
+  const { data: popSummaryYear2 } = useQuery({
+    queryKey: ['populationSummary', yearTo2, regionId],
+    queryFn: () => fetchPopulationSummary({ year: yearTo2, region_id: regionId ?? undefined }),
+    enabled: !municipalityId && yearTo2 >= yearFrom,
   })
 
   const { data: demoSummary } = useQuery({
@@ -71,12 +81,15 @@ export default function KPICards() {
     enabled: !municipalityId && previousYear != null,
   })
 
+  // Запрос для муниципалитетов – теперь начинаем с года, который покрывает yearTo-2 (если он в диапазоне)
+  const municipalityStartYear = yearTo2 >= yearFrom ? yearTo2 : (previousYear ?? yearTo)
+
   const { data: municipalityPopulationSeries = [] } = useQuery({
-    queryKey: ['kpiPopulationTimeseries', municipalityId, previousYear, yearTo],
+    queryKey: ['kpiPopulationTimeseries', municipalityId, municipalityStartYear, yearTo],
     queryFn: () =>
       fetchPopulationTimeseries({
         municipality_id: municipalityId ? [municipalityId] : [],
-        year_from: previousYear ?? yearTo,
+        year_from: municipalityStartYear,
         year_to: yearTo,
       }),
     enabled: !!municipalityId,
@@ -99,12 +112,22 @@ export default function KPICards() {
   const currentPopulationPoint = populationSeries.find((point) => point.year === yearTo)
   const previousPopulationPoint =
     previousYear == null ? undefined : populationSeries.find((point) => point.year === previousYear)
+  const populationPointYear2 = populationSeries.find((point) => point.year === yearTo2)
 
   const currentDemographicsPoint = demographicsSeries.find((point) => point.year === yearTo)
   const previousDemographicsPoint =
     previousYear == null ? undefined : demographicsSeries.find((point) => point.year === previousYear)
 
+  // Значения населения
   const populationValue = municipalityId ? currentPopulationPoint?.population : popSummary?.total_population
+  const previousPopulation = municipalityId
+    ? previousPopulationPoint?.population
+    : previousPopSummary?.total_population
+  const populationYear2 = municipalityId
+    ? populationPointYear2?.population
+    : popSummaryYear2?.total_population
+
+  // Абсолютное изменение
   const populationDelta = municipalityId
     ? currentPopulationPoint?.population != null && previousPopulationPoint?.population != null
       ? currentPopulationPoint.population - previousPopulationPoint.population
@@ -113,114 +136,249 @@ export default function KPICards() {
       ? popSummary.total_population - previousPopSummary.total_population
       : null
 
+  // Процентное изменение за последний год
+  const populationDeltaPercent = populationValue != null && previousPopulation != null
+    ? ((populationValue - previousPopulation) / previousPopulation) * 100
+    : null
+
+  // Предыдущее процентное изменение (год назад)
+  const previousPopulationDeltaPercent = previousPopulation != null && populationYear2 != null
+    ? ((previousPopulation - populationYear2) / populationYear2) * 100
+    : null
+
+  // Дельта процентных изменений (в п.п.)
+  const populationDeltaPercentDelta = (populationDeltaPercent != null && previousPopulationDeltaPercent != null)
+    ? populationDeltaPercent - previousPopulationDeltaPercent
+    : null
+
+  // ... остальные вычисления без изменений
   const naturalGrowthValue = municipalityId ? currentDemographicsPoint?.natural_growth : demoSummary?.total_natural_growth
-  const naturalGrowthDelta = municipalityId
-    ? currentDemographicsPoint?.natural_growth != null && previousDemographicsPoint?.natural_growth != null
-      ? currentDemographicsPoint.natural_growth - previousDemographicsPoint.natural_growth
-      : null
-    : demoSummary?.total_natural_growth != null && previousDemoSummary?.total_natural_growth != null
-      ? demoSummary.total_natural_growth - previousDemoSummary.total_natural_growth
-      : null
+  const previousNaturalGrowth = municipalityId
+    ? previousDemographicsPoint?.natural_growth
+    : previousDemoSummary?.total_natural_growth
 
   const birthRateValue = municipalityId ? currentDemographicsPoint?.birth_rate : demoSummary?.avg_birth_rate
-  const birthRateDelta = municipalityId
-    ? currentDemographicsPoint?.birth_rate != null && previousDemographicsPoint?.birth_rate != null
-      ? Number((currentDemographicsPoint.birth_rate - previousDemographicsPoint.birth_rate).toFixed(2))
-      : null
-    : demoSummary?.avg_birth_rate != null && previousDemoSummary?.avg_birth_rate != null
-      ? Number((demoSummary.avg_birth_rate - previousDemoSummary.avg_birth_rate).toFixed(2))
-      : null
+  const previousBirthRate = municipalityId
+    ? previousDemographicsPoint?.birth_rate
+    : previousDemoSummary?.avg_birth_rate
 
   const deathRateValue = municipalityId ? currentDemographicsPoint?.death_rate : demoSummary?.avg_death_rate
-  const deathRateDelta = municipalityId
-    ? currentDemographicsPoint?.death_rate != null && previousDemographicsPoint?.death_rate != null
-      ? Number((currentDemographicsPoint.death_rate - previousDemographicsPoint.death_rate).toFixed(2))
-      : null
-    : demoSummary?.avg_death_rate != null && previousDemoSummary?.avg_death_rate != null
-      ? Number((demoSummary.avg_death_rate - previousDemoSummary.avg_death_rate).toFixed(2))
-      : null
+  const previousDeathRate = municipalityId
+    ? previousDemographicsPoint?.death_rate
+    : previousDemoSummary?.avg_death_rate
 
   const migrationValue = municipalityId ? currentDemographicsPoint?.net_migration : demoSummary?.total_net_migration
-  const migrationDelta = municipalityId
-    ? currentDemographicsPoint?.net_migration != null && previousDemographicsPoint?.net_migration != null
-      ? currentDemographicsPoint.net_migration - previousDemographicsPoint.net_migration
-      : null
-    : demoSummary?.total_net_migration != null && previousDemoSummary?.total_net_migration != null
-      ? demoSummary.total_net_migration - previousDemoSummary.total_net_migration
-      : null
+  const previousMigration = municipalityId
+    ? previousDemographicsPoint?.net_migration
+    : previousDemoSummary?.total_net_migration
 
-  const cards = [
-    {
-      title: 'Население',
-      value: populationValue,
-      formatter: formatPopulation,
-      delta: populationDelta,
-      deltaFormatter: (value: number | null | undefined) => formatDelta(value),
-      positiveIsGood: true,
-      icon: <TeamOutlined style={{ color: '#2b6cb0' }} />,
-      color: '#ebf8ff',
-    },
-    {
-      title: 'Ест. прирост',
-      value: naturalGrowthValue,
-      formatter: formatPopulation,
-      delta: naturalGrowthDelta,
-      deltaFormatter: (value: number | null | undefined) => formatDelta(value),
-      positiveIsGood: true,
-      icon: <RiseOutlined style={{ color: '#38a169' }} />,
-      color: '#f0fff4',
-    },
-    {
-      title: 'Рождаемость',
-      value: birthRateValue,
-      formatter: formatRate,
-      delta: birthRateDelta,
-      deltaFormatter: (value: number | null | undefined) => (value == null ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(2)}‰`),
-      positiveIsGood: true,
-      icon: <HeartOutlined style={{ color: '#d69e2e' }} />,
-      color: '#fffbe6',
-    },
-    {
-      title: 'Смертность',
-      value: deathRateValue,
-      formatter: formatRate,
-      delta: deathRateDelta,
-      deltaFormatter: (value: number | null | undefined) => (value == null ? '—' : `${value > 0 ? '+' : ''}${value.toFixed(2)}‰`),
-      positiveIsGood: false,
-      icon: <FallOutlined style={{ color: '#e53e3e' }} />,
-      color: '#fff1f0',
-    },
-    {
-      title: 'Миграция',
-      value: migrationValue,
-      formatter: formatPopulation,
-      delta: migrationDelta,
-      deltaFormatter: (value: number | null | undefined) => formatDelta(value),
-      positiveIsGood: true,
-      icon: <SwapOutlined style={{ color: '#805ad5' }} />,
-      color: '#f9f0ff',
-    },
-  ]
+  const birthsAbsolute = birthRateValue != null && populationValue != null
+    ? (birthRateValue * populationValue) / 1000
+    : null
+  const previousBirthsAbsolute = previousBirthRate != null && previousPopulation != null
+    ? (previousBirthRate * previousPopulation) / 1000
+    : null
+
+  const deathsAbsolute = deathRateValue != null && populationValue != null
+    ? (deathRateValue * populationValue) / 1000
+    : null
+  const previousDeathsAbsolute = previousDeathRate != null && previousPopulation != null
+    ? (previousDeathRate * previousPopulation) / 1000
+    : null
+
+  const birthRatePercent = birthRateValue != null ? birthRateValue / 10 : null
+  const previousBirthRatePercent = previousBirthRate != null ? previousBirthRate / 10 : null
+  const deathRatePercent = deathRateValue != null ? deathRateValue / 10 : null
+  const previousDeathRatePercent = previousDeathRate != null ? previousDeathRate / 10 : null
+
+  const naturalGrowthPercent = naturalGrowthValue != null && populationValue != null
+    ? (naturalGrowthValue / populationValue) * 100
+    : null
+  const prevNaturalGrowthPercent = previousNaturalGrowth != null && previousPopulation != null
+    ? (previousNaturalGrowth / previousPopulation) * 100
+    : null
+
+  const migrationPercent = migrationValue != null && populationValue != null
+    ? (migrationValue / populationValue) * 100
+    : null
+  const prevMigrationPercent = previousMigration != null && previousPopulation != null
+    ? (previousMigration / previousPopulation) * 100
+    : null
+
+  const cards = useMemo(() => {
+    const isPercent = valueMode === 'percent'
+
+    return [
+      {
+        title: 'Население',
+        value: isPercent ? populationDeltaPercent : populationValue,
+        formatter: isPercent
+          ? (v: number | null) => (v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '—')
+          : formatPopulation,
+        delta: isPercent ? populationDeltaPercentDelta : populationDelta,
+        deltaFormatter: isPercent
+          ? (v: number | null | undefined) => v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)} п.п.` : '—'
+          : (v: number | null | undefined) => formatDelta(v),
+        positiveIsGood: true,
+        icon: <TeamOutlined style={{ color: '#2b6cb0' }} />,
+        color: '#ebf8ff',
+      },
+      // ... остальные карточки без изменений ...
+      {
+        title: 'Ест. прирост',
+        value: isPercent ? naturalGrowthPercent : naturalGrowthValue,
+        formatter: isPercent
+          ? (v: number | null) => (v != null ? `${v.toFixed(2)}%` : '—')
+          : formatPopulation,
+        delta: isPercent
+          ? (naturalGrowthPercent != null && prevNaturalGrowthPercent != null
+            ? naturalGrowthPercent - prevNaturalGrowthPercent
+            : null)
+          : (municipalityId
+            ? naturalGrowthValue != null && previousNaturalGrowth != null
+              ? naturalGrowthValue - previousNaturalGrowth
+              : null
+            : naturalGrowthValue != null && previousNaturalGrowth != null
+              ? naturalGrowthValue - previousNaturalGrowth
+              : null),
+        deltaFormatter: isPercent
+          ? (v: number | null | undefined) => v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)} п.п.` : '—'
+          : (v: number | null | undefined) => formatDelta(v),
+        positiveIsGood: true,
+        icon: <RiseOutlined style={{ color: '#38a169' }} />,
+        color: '#f0fff4',
+      },
+      {
+        title: 'Рождаемость',
+        value: isPercent ? birthRatePercent : birthsAbsolute,
+        formatter: isPercent
+          ? (v: number | null) => (v != null ? `${v.toFixed(2)}%` : '—')
+          : formatPopulation,
+        delta: isPercent
+          ? (birthRatePercent != null && previousBirthRatePercent != null
+            ? birthRatePercent - previousBirthRatePercent
+            : null)
+          : (birthsAbsolute != null && previousBirthsAbsolute != null
+            ? birthsAbsolute - previousBirthsAbsolute
+            : null),
+        deltaFormatter: isPercent
+          ? (v: number | null | undefined) => v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)} п.п.` : '—'
+          : (v: number | null | undefined) => formatDelta(v),
+        positiveIsGood: true,
+        icon: <HeartOutlined style={{ color: '#d69e2e' }} />,
+        color: '#fffbe6',
+      },
+      {
+        title: 'Смертность',
+        value: isPercent ? deathRatePercent : deathsAbsolute,
+        formatter: isPercent
+          ? (v: number | null) => (v != null ? `${v.toFixed(2)}%` : '—')
+          : formatPopulation,
+        delta: isPercent
+          ? (deathRatePercent != null && previousDeathRatePercent != null
+            ? deathRatePercent - previousDeathRatePercent
+            : null)
+          : (deathsAbsolute != null && previousDeathsAbsolute != null
+            ? deathsAbsolute - previousDeathsAbsolute
+            : null),
+        deltaFormatter: isPercent
+          ? (v: number | null | undefined) => v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)} п.п.` : '—'
+          : (v: number | null | undefined) => formatDelta(v),
+        positiveIsGood: false,
+        icon: <FallOutlined style={{ color: '#e53e3e' }} />,
+        color: '#fff1f0',
+      },
+      {
+        title: 'Миграция',
+        value: isPercent ? migrationPercent : migrationValue,
+        formatter: isPercent
+          ? (v: number | null) => (v != null ? `${v.toFixed(2)}%` : '—')
+          : formatPopulation,
+        delta: isPercent
+          ? (migrationPercent != null && prevMigrationPercent != null
+            ? migrationPercent - prevMigrationPercent
+            : null)
+          : (municipalityId
+            ? migrationValue != null && previousMigration != null
+              ? migrationValue - previousMigration
+              : null
+            : migrationValue != null && previousMigration != null
+              ? migrationValue - previousMigration
+              : null),
+        deltaFormatter: isPercent
+          ? (v: number | null | undefined) => v != null ? `${v > 0 ? '+' : ''}${v.toFixed(2)} п.п.` : '—'
+          : (v: number | null | undefined) => formatDelta(v),
+        positiveIsGood: true,
+        icon: <SwapOutlined style={{ color: '#805ad5' }} />,
+        color: '#f9f0ff',
+      },
+    ]
+  }, [
+    valueMode,
+    populationValue,
+    populationDelta,
+    populationDeltaPercent,
+    populationDeltaPercentDelta,
+    naturalGrowthValue,
+    naturalGrowthPercent,
+    prevNaturalGrowthPercent,
+    previousNaturalGrowth,
+    birthsAbsolute,
+    previousBirthsAbsolute,
+    birthRatePercent,
+    previousBirthRatePercent,
+    deathsAbsolute,
+    previousDeathsAbsolute,
+    deathRatePercent,
+    previousDeathRatePercent,
+    migrationValue,
+    migrationPercent,
+    prevMigrationPercent,
+    previousMigration,
+    municipalityId,
+  ])
 
   return (
-    <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-      {cards.map((card) => (
-        <Col xs={24} sm={12} lg={12} xl={4} key={card.title} flex="1">
-          <Card className="kpi-card" size="small" style={{ background: card.color, borderColor: 'transparent' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <Statistic
-                  title={card.title}
-                  value={card.value != null ? card.formatter(card.value as number) : '—'}
-                  valueStyle={{ fontSize: 22, fontWeight: 600 }}
-                />
-                <DeltaHint value={card.delta} formatter={card.deltaFormatter} positiveIsGood={card.positiveIsGood} />
+    <Card
+      title="Ключевые показатели"
+      extra={
+        <Segmented
+          value={valueMode}
+          onChange={(val) => setValueMode(val as 'absolute' | 'percent')}
+          options={[
+            { label: 'Абсолютные', value: 'absolute' },
+            { label: 'Проценты', value: 'percent' },
+          ]}
+        />
+      }
+      style={{ marginBottom: 16 }}
+    >
+      <Row gutter={[32, 16]}>
+        {cards.map((card) => (
+          <Col key={card.title} flex="1" style={{ minWidth: 0 }}>
+            <Card
+              size="small"
+              style={{ background: card.color, borderColor: 'transparent' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Statistic
+                    title={card.title}
+                    value={card.value != null ? card.formatter(card.value as number) : '—'}
+                    valueStyle={{ fontSize: 22, fontWeight: 600 }}
+                  />
+                  <DeltaHint
+                    value={card.delta}
+                    formatter={card.deltaFormatter!}
+                    positiveIsGood={card.positiveIsGood}
+                  />
+                </div>
+                <div style={{ fontSize: 24, opacity: 0.6, flexShrink: 0 }}>{card.icon}</div>
               </div>
-              <div style={{ fontSize: 24, opacity: 0.6 }}>{card.icon}</div>
-            </div>
-          </Card>
-        </Col>
-      ))}
-    </Row>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    </Card>
   )
 }

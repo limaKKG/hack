@@ -449,7 +449,7 @@ export default function PopulationMap() {
   const [mapLevel, setMapLevel] = useState<MapLevel>('region')
   const [mapMetric, setMapMetric] = useState<MapMetric>('density')
   const [selectedYear, setSelectedYear] = useState(2022)
-  const [yearFrom, setYearFrom] = useState(2010)
+  const [yearFrom, setYearFrom] = useState(2021)
   const [yearTo, setYearTo] = useState(2022)
 
   const apiKey = import.meta.env.VITE_YANDEX_MAPS_API_KEY?.trim() || ''
